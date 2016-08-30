@@ -1,0 +1,302 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "vm-size": {
+            "type": "String"
+        },
+        "address-prefix": {
+            "type": "String"
+        },
+        "machine-count": {
+            "type": "int"
+        },
+        "dns-prefix": {
+            "type": "String"
+        } ,
+        "admin-username": {
+            "type": "String"
+        },
+        "ssh-key": {
+            "type": "String"
+        },
+        "vnet-addressSpace": {
+            "type": "String"
+        },
+        "vnet-subnet01-prefix": {
+            "type": "String"
+        },
+        "vnet-subnet02-prefix": {
+            "type": "String"
+        },
+        "sourceAddressPrefix": {
+            "type": "String"
+        }
+    },
+    "variables": {
+      "ssh-keypath": "[concat('/home/', parameters('admin-username'), '/.ssh/authorized_keys')]",
+      "storage-name": "[concat(parameters('dns-prefix'), resourceGroup().name)]",
+      "ip-prefix": "[concat(resourceGroup().name, '-ip-')]",
+      "nsg-name": "[concat(resourceGroup().name, '-nsg')]",
+      "vnet-name": "[concat(resourceGroup().name, '-vnet')]",
+      "access-nic-internal": "[concat(resourceGroup().name, '-access-nic-internal')]",
+      "access-nic-external": "[concat(resourceGroup().name, '-access-nic-external')]",
+      "vm-prefix": "[concat(resourceGroup().name, '-vm-')]",
+      "names": [ "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda", "mu", "nu", "xi", "omicron", "pi", "rho", "sigma", "tau", "upsilon", "phi", "chi", "psi", "omega" ]
+    },
+    "resources": [
+        {
+            "comments": "",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "name": "[concat(variables('ip-prefix'), variables('names')[copyindex(0)])]",
+            "apiVersion": "2016-03-30",
+            "location": "[resourceGroup().location]",
+            "copy": {
+              "name": "vm-count",
+              "count": "[parameters('machine-count')]"
+            },
+            "properties": {
+                "publicIPAllocationMethod": "Dynamic",
+                "idleTimeoutInMinutes": 4,
+                "dnsSettings": {
+                    "domainNameLabel": "[concat(parameters('dns-prefix'), resourceGroup().name, '-', variables('names')[copyindex(0)])]"
+                }
+            },
+            "resources": [],
+            "dependsOn": []
+        },
+        {
+            "comments": "",
+            "type": "Microsoft.Compute/virtualMachines",
+            "name": "[concat(variables('vm-prefix'), variables('names')[copyindex(0)])]",
+            "apiVersion": "2015-06-15",
+            "location": "[resourceGroup().location]",
+            "copy": {
+              "name": "vm-count",
+              "count": "[parameters('machine-count')]"
+            },
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[parameters('vm-size')]"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "OpenLogic",
+                        "offer": "CentOS",
+                        "sku": "7.2",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "name": "[concat(concat(variables('vm-prefix'), variables('names')[copyindex(0)]), '-boot')]",
+                        "createOption": "FromImage",
+                        "vhd": {
+                            "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/', variables('storage-name')), '2015-06-15').primaryEndpoints.blob, 'vhds/boot-', variables('names')[copyindex(0)], '.vhd')]"
+                        },
+                        "caching": "ReadWrite"
+                    },
+                    "dataDisks": [
+                      {
+                        "name": "[concat(concat(variables('vm-prefix'), variables('names')[copyindex(0)]), '-disk01')]",
+                        "diskSizeGB": "127",
+                        "lun": 0,
+                        "vhd": {
+                          "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/', variables('storage-name')), '2015-06-15').primaryEndpoints.blob, 'vhds/data01-', variables('names')[copyindex(0)], '.vhd')]"
+                        },
+                        "createOption": "Empty"
+                      }
+                    ]
+                },
+                "osProfile": {
+                    "computerName": "[concat(variables('vm-prefix'), variables('names')[copyindex(0)])]",
+                    "adminUsername": "[parameters('admin-username')]",
+                    "linuxConfiguration": {
+                        "disablePasswordAuthentication": true,
+                      "ssh": {
+                        "publicKeys": [
+                          {
+                            "path": "[variables('ssh-keypath')]",
+                            "keyData": "[parameters('ssh-key')]"
+                          }
+                        ]
+                      }
+                    }
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat('nic-', variables('names')[copyindex(0)]))]"
+                        }
+                    ]
+                }
+            },
+            "resources": [],
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storage-name'))]",
+                "[resourceId('Microsoft.Network/networkInterfaces', concat('nic-', variables('names')[copyindex(0)]))]"
+            ]
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines/extensions",
+            "name": "[concat(variables('vm-prefix'), variables('names')[copyindex(0)], '/', variables('vm-prefix'), 'script-', variables('names')[copyindex(0)])]",
+            "apiVersion": "2015-05-01-preview",
+            "location": "[resourceGroup().location]",
+            "copy": {
+              "name": "vm-count",
+              "count": "[parameters('machine-count')]"
+            },
+            "dependsOn": [
+                "[concat(variables('vm-prefix'), variables('names')[copyindex(0)])]"
+            ],
+            "properties": {
+                "publisher": "Microsoft.OSTCExtensions",
+                "type": "CustomScriptForLinux",
+                "typeHandlerVersion": "1.2",
+                "settings": {
+                    "fileUris": [
+                        "https://raw.githubusercontent.com/davidbetz/webapipy/master/deploy/install.sh"
+                    ],
+                    "commandToExecute": "sh install.sh"
+                }
+            }
+        },
+        {
+            "comments": "",
+            "type": "Microsoft.Network/networkInterfaces",
+            "name": "[concat('nic-', variables('names')[copyindex(0)])]",
+            "apiVersion": "2016-03-30",
+            "location": "[resourceGroup().location]",
+            "copy": {
+              "name": "vm-count",
+              "count": "[parameters('machine-count')]"
+            },
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ifconfig",
+                        "properties": {
+                            "privateIPAddress": "[concat(parameters('address-prefix'), variables('names')[copyindex(0)])]",
+                            "privateIPAllocationMethod": "Dynamic",
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses', concat(variables('ip-prefix'), variables('names')[copyindex(0)]))]"
+                            },
+                            "subnet": {
+                                "id": "[concat(resourceId('Microsoft.Network/virtualNetworks', variables('vnet-name')), '/subnets/subnet01')]"
+                            }
+                        }
+                    }
+                ],
+                "dnsSettings": {
+                    "dnsServers": []
+                },
+                "enableIPForwarding": false,
+                "networkSecurityGroup": {
+                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsg-name'))]"
+                }
+            },
+            "resources": [],
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/publicIPAddresses', concat(variables('ip-prefix'), variables('names')[copyindex(0)]))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('vnet-name'))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsg-name'))]"
+            ]
+        },
+        {
+            "comments": "",
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "name": "[variables('nsg-name')]",
+            "apiVersion": "2016-03-30",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "securityRules": [
+                    {
+                        "name": "default-allow-ssh",
+                        "properties": {
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "22",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 1000,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "http",
+                        "properties": {
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "80",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 1100,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "https",
+                        "properties": {
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "443",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 1200,
+                            "direction": "Inbound"
+                        }
+                    }
+                ]
+            },
+            "resources": [],
+            "dependsOn": []
+        },
+        {
+            "comments": "",
+            "type": "Microsoft.Network/virtualNetworks",
+            "name": "[variables('vnet-name')]",
+            "apiVersion": "2016-03-30",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "[parameters('vnet-addressSpace')]"
+                    ]
+                },
+                "subnets": [
+                    {
+                        "name": "subnet01",
+                        "properties": {
+                            "addressPrefix": "[parameters('vnet-subnet01-prefix')]"
+                        }
+                    },
+                    {
+                        "name": "subnet02",
+                        "properties": {
+                            "addressPrefix": "[parameters('vnet-subnet02-prefix')]"
+                        }
+                    }
+                ]
+            },
+            "resources": [],
+            "dependsOn": []
+        },
+        {
+            "comments": "",
+            "type": "Microsoft.Storage/storageAccounts",
+            "sku": {
+                "name": "Standard_LRS",
+                "tier": "Standard"
+            },
+            "kind": "Storage",
+            "name": "[variables('storage-name')]",
+            "apiVersion": "2016-01-01",
+            "location": "[resourceGroup().location]",
+            "tags": {},
+            "properties": { },
+            "resources": [],
+            "dependsOn": []
+        }
+    ]
+}

@@ -1,0 +1,9 @@
+{
+    "files.exclude": {
+        "**/*.pyc": {
+            "when": "$(basename).py"
+        }
+    },
+    "python.linting.pylintEnabled": false,
+    "python.formatting.provider": "yapf"
+}

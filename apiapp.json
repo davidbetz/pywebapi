@@ -1,0 +1,14 @@
+{
+ "$schema": "http://json-schema.org/schemas/2014-11-01/apiapp.json#",
+ "id": "Bumblebee",
+ "namespace": "microsoft.com",
+ "gateway": "2015-01-14",
+ "version": "1.9.0",
+ "title": "Bumblebee",
+ "summary": "",
+ "author": "",
+ "endpoints": {
+ "apiDefinition": "/swagger",
+ "status": null
+ }
+}
